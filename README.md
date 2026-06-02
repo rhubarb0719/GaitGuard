@@ -2,30 +2,77 @@
 
 This repository contains the main deliverables for a prototype **wearable fall-risk detection / alerting** project: enclosure hardware design, on-device inference firmware, and an ML data preprocessing + Edge Impulse training workflow based on the GSTRIDE dataset.
 
-> The folder layout is designed for review: you can jump from this root README directly to the relevant materials and reproduction steps.
+> Designed for review: start from the architecture below, then jump to each deliverable folder.
 
 ---
 
-## Repository structure (start here)
+## Architecture (end-to-end)
+
+The system consists of two major parts: an **offline ML pipeline** (data → model) and an **on-device runtime** (sensor → inference → feedback).
+
+```mermaid
+flowchart LR
+  subgraph Offline["Offline (ML)"]
+    A["GSTRIDE v3 dataset<br/>IMU CSV + labels Excel"] --> B["Preprocess & windowing<br/>`ml/preprocess_gstride.py`"]
+    B --> C["Edge Impulse dataset<br/>`ml/ei_dataset_5s/{training,testing}`"]
+    C --> D["Edge Impulse training<br/>(DSP features + classifier)"]
+    D --> E["Export inference library<br/>`firmware/lib/a5s-Gaitgaurd_inferencing/`"]
+  end
+
+  subgraph Device["Device (Firmware)"]
+    S["LSM6DS3 IMU (6-axis)"] --> M["ESP32-S3 firmware<br/>`firmware/src/main.cpp`"]
+    M --> I["Window buffer @ `EI_CLASSIFIER_FREQUENCY`<br/>→ `run_classifier(...)`"]
+    I --> P["`P(faller)` + smoothing"]
+    P --> F["Feedback policy<br/>silent / vibration / buzzer"]
+  end
+
+  E --> M
+```
+
+---
+
+## Deliverables map (annotated tree)
 
 ```
-docs/                 Demo assets (video, etc.)
-firmware/             On-device firmware (ESP32-S3 + Edge Impulse inference)
-hardware/             Enclosure/CAD assets and assembly references
-ml/                   ML preprocessing and Edge Impulse dataset export
+GaitGuard/
+├── README.md                          ← Repository front page (this file)
+├── docs/                              ← Demo assets
+│   ├── demo_video.mov                 ← Demo video (large file; may be git-ignored)
+│   └── HWSW2-poster.pdf               ← Project poster
+├── hardware/                          ← Enclosure / hardware documentation
+│   ├── Gaitgaurd.pdf                  ← Hardware document (notes/drawings/figures)
+│   ├── front layer.png                ← Layer diagram (front)
+│   ├── back layer.png                 ← Layer diagram (back)
+│   ├── printed enclosure.JPG          ← Photo of the printed enclosure
+│   └── enclosure/                     ← 3D printable files
+│       ├── 底部.stl
+│       ├── 盖子.stl
+│       └── 扁嘴夹.3mf
+├── firmware/                          ← ESP32-S3 firmware (PlatformIO)
+│   ├── platformio.ini                 ← Board/framework/serial settings
+│   ├── src/
+│   │   └── main.cpp                   ← Main firmware: IMU → inference → feedback
+│   └── lib/
+│       └── a5s-Gaitgaurd_inferencing/ ← Edge Impulse exported inference library
+├── ml/                                ← ML preprocessing + Edge Impulse dataset export
+│   ├── README.md                      ← ML pipeline documentation
+│   ├── preprocess_gstride.py          ← GSTRIDE → windowed CSVs for Edge Impulse
+│   └── GSTRIDE_DDBB.xlsx              ← Labels Excel (input to preprocessing)
+└── .gitignore                         ← Ignores OS artifacts and large datasets/videos
 ```
 
 ---
 
 ## Demo (`docs/`)
 
-- `docs/demo_video.MOV`: project demo video (large file).
+- `docs/demo_video.mov`: project demo video (large file).
+- `docs/HWSW2-poster.pdf`: project poster.
 
 ---
 
 ## Firmware (`firmware/`)
 
-Goal: read **LSM6DS3 6-axis IMU** data on a **Seeed XIAO ESP32S3**, buffer samples using the same frequency/windowing as the Edge Impulse model, run inference to obtain `P(faller)`, then map it to alert policies with different intensities (silent / vibration / buzzer).
+Goal: read **LSM6DS3 6-axis IMU** data on a **Seeed XIAO ESP32S3**, buffer samples at `EI_CLASSIFIER_FREQUENCY`, run inference, then map `P(faller)` to alert policies (silent / vibration / buzzer).
 
 ### Key files
 
@@ -54,29 +101,10 @@ Goal: read **LSM6DS3 6-axis IMU** data on a **Seeed XIAO ESP32S3**, buffer sampl
 
 Goal: preprocess **GSTRIDE v3** subject IMU CSVs + label Excel into per-window CSV files that can be uploaded to Edge Impulse (train/test split by subject to avoid leakage).
 
-### Key files
-
-- `ml/preprocess_gstride.py`: preprocessing script from GSTRIDE → Edge Impulse
-  - Reads `ml/GSTRIDE_DDBB.xlsx` (labels)
-  - Reads `ml/GSTRIDE_database/_IMU/*.csv` (IMU)
-  - Subject-level stratified train/test split (no leakage)
-  - Windows with 5-second window length and 5-second stride (no overlap), and exports to `ml/ei_dataset_5s/`
-- `ml/GSTRIDE_DDBB.xlsx`: GSTRIDE label sheet (script input)
-- `ml/GSTRIDE_database/`: extracted GSTRIDE dataset directory (script input)
-- `ml/ei_dataset_5s/`: generated Edge Impulse upload dataset (training/testing categories)
-
-### How to run the preprocessing script
-
-From the `ml/` directory:
-
-- Dry-run (stats only, no file writes):
-  - `python preprocess_gstride.py --dry-run`
-- Write CSVs (clears `ei_dataset_5s/{training,testing}` and regenerates):
-  - `python preprocess_gstride.py --write`
-
-The script prints suggested Edge Impulse uploader commands at the end (upload by training/testing category).
-
-> Note: if your course requires an Edge Impulse public project link, experiment comparisons, confusion matrices, etc., add `README.md` and `results/` under `ml/` (per your ML deliverables checklist).
+See `ml/README.md` for the full pipeline documentation and exact commands:
+- Preprocessing: `python preprocess_gstride.py --dry-run` / `--write`
+- Edge Impulse upload commands
+- Parameter defaults (window/stride/split/trim)
 
 ---
 
@@ -95,5 +123,7 @@ Goal: provide enclosure/structure design assets and assembly references.
 
 ## Notes (recommended cleanup before submission)
 
-This repo currently contains multiple `.DS_Store` files (generated by macOS Finder). If your submission rules disallow them, delete them before submitting and add them to `.gitignore`.
+This repo may include `.DS_Store` files (generated by macOS Finder). If your submission rules disallow them, delete them before submitting.
+
+Large artifacts are intentionally ignored in `.gitignore` (e.g., datasets and large videos) to keep the GitHub repo lightweight.
 

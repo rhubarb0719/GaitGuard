@@ -136,7 +136,7 @@ const ei_impulse_t impulse_1012428_1 = {
     .project_name = "5s-Gaitgaurd",
     .impulse_id = 1,
     .impulse_name = "Impulse #1",
-    .deploy_version = 2,
+    .deploy_version = 3,
 
     .nn_input_frame_size = 3102,
     .raw_sample_count = 517,

@@ -4,32 +4,42 @@
 
 // ===== 硬件配置 =====
 #define LSM6DS3_ADDR  0x6A
-#define BUZZER_PIN    1     // D0
-#define ERM_PIN       2     // D1
+#define BUZZER_PIN    1
+#define ERM_PIN       2
 
-// LSM6DS3 寄存器
 #define REG_CTRL1_XL  0x10
 #define REG_CTRL2_G   0x11
-#define REG_OUTX_L_G  0x22  // 陀螺仪起始寄存器（之后连读到加速度）
+#define REG_OUTX_L_G  0x22
 
-// 量程转换系数（输出单位必须和 GSTRIDE 训练数据一致）
-// LSM6DS3 默认: 加速度 ±2g, 陀螺仪 ±250dps
-// 训练数据单位: 加速度 m/s², 陀螺仪 rad/s
-const float ACC_SENS = 0.000488f * 9.80665f;  // ±16g: 0.488 mg/LSB
-const float GYR_SENS = 0.070f    * 0.0174533f; // ±2000dps: 70 mdps/LSB
+const float ACC_SENS = 0.000488f * 9.80665f;
+const float GYR_SENS = 0.070f    * 0.0174533f;
 
 // ===== 推理 buffer =====
 static float features[EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE];
 static size_t feature_ix = 0;
 
-// 采样定时
 const unsigned long SAMPLE_INTERVAL_US = 1000000.0 / EI_CLASSIFIER_FREQUENCY;
 unsigned long next_sample_us = 0;
 
-// 多窗口平滑（最近 3 个窗口的 P(faller) 平均）
-#define SMOOTH_N 3
-float p_faller_history[SMOOTH_N] = {0, 0, 0};
+// ===== 两层平滑 =====
+#define SMOOTH_N 5
+float p_faller_history[SMOOTH_N] = {0};
 int   p_history_idx = 0;
+bool  smooth_filled = false;
+
+#define RISK_WINDOW 6
+float risk_history[RISK_WINDOW] = {0};
+int   risk_history_idx = 0;
+bool  risk_filled = false;
+
+#define N_CONSECUTIVE 2
+int consecutive_high = 0;
+
+#define THRESH_LOW    0.55f
+#define THRESH_HIGH   0.75f
+
+// 静止检测阈值（加速度均方值，可根据实测调整）
+#define STATIC_THRESHOLD 100.0f
 
 // ===== 工具函数 =====
 void writeReg(byte reg, byte val) {
@@ -39,12 +49,10 @@ void writeReg(byte reg, byte val) {
   Wire.endTransmission();
 }
 
-// 读 6 轴：陀螺(gx,gy,gz) + 加速(ax,ay,az)，连续 12 字节
 bool readIMU(float *acc, float *gyr) {
   Wire.beginTransmission(LSM6DS3_ADDR);
   Wire.write(REG_OUTX_L_G);
   if (Wire.endTransmission(false) != 0) return false;
-
   Wire.requestFrom(LSM6DS3_ADDR, 12);
   if (Wire.available() < 12) return false;
 
@@ -65,19 +73,14 @@ bool readIMU(float *acc, float *gyr) {
 }
 
 // ===== 反馈输出 =====
-// Low: 完全静默,不打扰用户
-void feedback_low() {
-  // 啥也不做
-}
+void feedback_low() {}
 
-// Medium: 只震动,不响——温和提醒,不引起焦虑
 void feedback_medium() {
   digitalWrite(ERM_PIN, HIGH);
   delay(200);
   digitalWrite(ERM_PIN, LOW);
 }
 
-// High: 只响,不震动——最大化听觉感知,确保高风险时刻被注意到
 void feedback_high() {
   for (int i = 0; i < 3; i++) {
     ledcWriteTone(BUZZER_PIN, 2000);
@@ -87,26 +90,22 @@ void feedback_high() {
   }
 }
 
-// ===== Edge Impulse 回调 =====
 int raw_feature_get_data(size_t offset, size_t length, float *out_ptr) {
   memcpy(out_ptr, features + offset, length * sizeof(float));
   return 0;
 }
 
-// ===== setup / loop =====
+// ===== setup =====
 void setup() {
   Serial.begin(115200);
   delay(2000);
-  Serial.println("\n=== GaitGuard Inference ===");
+  Serial.println("\n=== GaitGuard - Fall Risk Assessment ===");
 
   Wire.begin();
-  Wire.setClock(400000);  // 400kHz I2C
+  Wire.setClock(400000);
 
-  // LSM6DS3 配置:
-  // CTRL1_XL = 0x40 -> ODR=104Hz, FS=±2g
-  // CTRL2_G  = 0x40 -> ODR=104Hz, FS=±250dps
-  writeReg(REG_CTRL1_XL, 0x44);  // ODR=104Hz, FS=±16g - 与 GSTRIDE CSIC 一致
-  writeReg(REG_CTRL2_G,  0x4C);  // ODR=104Hz, FS=±2000dps - 与 GSTRIDE CSIC 一致
+  writeReg(REG_CTRL1_XL, 0x44);
+  writeReg(REG_CTRL2_G,  0x4C);
 
   pinMode(ERM_PIN, OUTPUT);
   digitalWrite(ERM_PIN, LOW);
@@ -118,36 +117,31 @@ void setup() {
                 EI_CLASSIFIER_RAW_SAMPLE_COUNT,
                 EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME,
                 EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE);
-  Serial.println("Feedback policy:");
-  Serial.println("  LOW    -> silent");
-  Serial.println("  MEDIUM -> vibration only");
-  Serial.println("  HIGH   -> buzzer only");
-  Serial.println("Starting sampling...\n");
+  Serial.println("Thresholds: LOW<0.35 | MEDIUM<0.65 | HIGH>=0.65");
+  Serial.println("Starting...\n");
 
   next_sample_us = micros();
 }
 
+// ===== loop =====
 void loop() {
-  // 1. 等到下一个采样时刻
   if ((long)(micros() - next_sample_us) < 0) return;
   next_sample_us += SAMPLE_INTERVAL_US;
 
-  // 2. 读 6 轴
   float acc[3], gyr[3];
   if (!readIMU(acc, gyr)) {
     Serial.println("IMU read failed");
     return;
   }
 
-  // === DEBUG: 每 100 次采样打印一次原始 6 轴值（约每 1 秒一次）===
+  // DEBUG: 每100次打印一次
   static int dbg_counter = 0;
   if (++dbg_counter >= 100) {
     dbg_counter = 0;
-    Serial.printf("DEBUG: acc=[%+6.2f %+6.2f %+6.2f]  gyr=[%+6.3f %+6.3f %+6.3f]\n",
+    Serial.printf("DEBUG acc=[%+6.2f %+6.2f %+6.2f] gyr=[%+6.3f %+6.3f %+6.3f]\n",
                   acc[0], acc[1], acc[2], gyr[0], gyr[1], gyr[2]);
   }
 
-  // 3. 填进 features buffer（顺序: accX, accY, accZ, gyrX, gyrY, gyrZ）
   features[feature_ix++] = acc[0];
   features[feature_ix++] = acc[1];
   features[feature_ix++] = acc[2];
@@ -155,13 +149,29 @@ void loop() {
   features[feature_ix++] = gyr[1];
   features[feature_ix++] = gyr[2];
 
-  // 4. buffer 满了 → 跑推理
   if (feature_ix >= EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE) {
+
+    // 静止检测：计算加速度均方值
+    float acc_ms = 0;
+    for (size_t i = 0; i < EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE; i += 6) {
+      acc_ms += features[i]*features[i] 
+              + features[i+1]*features[i+1] 
+              + features[i+2]*features[i+2];
+    }
+    acc_ms /= (EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE / 6);
+
+    if (acc_ms < STATIC_THRESHOLD) {
+      Serial.printf("STATIC (acc_ms=%.1f) -> silent\n", acc_ms);
+      feature_ix = 0;
+      return;
+    }
+
+    // 推理
     signal_t signal;
     signal.total_length = EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE;
     signal.get_data = &raw_feature_get_data;
 
-    ei_impulse_result_t result = { 0 };
+    ei_impulse_result_t result = {0};
     EI_IMPULSE_ERROR err = run_classifier(&signal, &result, false);
 
     if (err != EI_IMPULSE_OK) {
@@ -170,7 +180,7 @@ void loop() {
       return;
     }
 
-    // 5. 找出 faller 类别的概率
+    // P(faller)
     float p_faller = 0;
     for (uint16_t i = 0; i < EI_CLASSIFIER_LABEL_COUNT; i++) {
       if (strcmp(result.classification[i].label, "faller") == 0) {
@@ -178,26 +188,50 @@ void loop() {
       }
     }
 
-    // 6. 滑动平均
+    // 短期平滑
     p_faller_history[p_history_idx] = p_faller;
     p_history_idx = (p_history_idx + 1) % SMOOTH_N;
-    float p_smoothed = 0;
-    for (int i = 0; i < SMOOTH_N; i++) p_smoothed += p_faller_history[i];
-    p_smoothed /= SMOOTH_N;
+    if (p_history_idx == 0) smooth_filled = true;
 
-    // 7. 阈值映射 → 触发反馈
-    Serial.printf("P(faller)=%.3f  smoothed=%.3f  ", p_faller, p_smoothed);
-    if (p_smoothed < 0.4f) {
-      Serial.println("[LOW]    -> silent");
-      feedback_low();
-    } else if (p_smoothed < 0.7f) {
+    float p_smoothed = 0;
+    int n_smooth = smooth_filled ? SMOOTH_N : p_history_idx;
+    if (n_smooth == 0) n_smooth = 1;
+    for (int i = 0; i < n_smooth; i++) p_smoothed += p_faller_history[i];
+    p_smoothed /= n_smooth;
+
+    // 长期 risk_score
+    risk_history[risk_history_idx] = p_smoothed;
+    risk_history_idx = (risk_history_idx + 1) % RISK_WINDOW;
+    if (risk_history_idx == 0) risk_filled = true;
+
+    float risk_score = 0;
+    int n_risk = risk_filled ? RISK_WINDOW : risk_history_idx;
+    if (n_risk == 0) n_risk = 1;
+    for (int i = 0; i < n_risk; i++) risk_score += risk_history[i];
+    risk_score /= n_risk;
+
+    // 输出
+    Serial.printf("acc_ms=%.1f  P(faller)=%.3f  smoothed=%.3f  risk_score=%.3f  ",
+                  acc_ms, p_faller, p_smoothed, risk_score);
+
+    if (risk_score >= THRESH_HIGH) {
+      consecutive_high++;
+      if (consecutive_high >= N_CONSECUTIVE) {
+        Serial.println("[HIGH] -> buzzer");
+        feedback_high();
+      } else {
+        Serial.printf("[HIGH pending %d/%d]\n", consecutive_high, N_CONSECUTIVE);
+      }
+    } else if (risk_score >= THRESH_LOW) {
+      consecutive_high = 0;
       Serial.println("[MEDIUM] -> vibration");
       feedback_medium();
     } else {
-      Serial.println("[HIGH]   -> buzzer");
-      feedback_high();
+      consecutive_high = 0;
+      Serial.println("[LOW] -> silent");
+      feedback_low();
     }
 
-    feature_ix = 0;  // 准备下一个窗口
+    feature_ix = 0;
   }
 }
