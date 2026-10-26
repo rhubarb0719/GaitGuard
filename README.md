@@ -18,23 +18,46 @@ Click the image to open the full-resolution PDF: [`docs/HWSW2-poster.pdf`](docs/
 
 The system consists of two major parts: an **offline ML pipeline** (data → model) and an **on-device runtime** (sensor → inference → feedback).
 
-```mermaid
-flowchart LR
-  subgraph Offline["Offline (ML)"]
-    A["GSTRIDE v3 dataset<br/>IMU CSV + labels Excel"] --> B["Preprocess & windowing<br/>`ml/preprocess_gstride.py`"]
-    B --> C["Edge Impulse dataset<br/>`ml/ei_dataset_5s/{training,testing}`"]
-    C --> D["Edge Impulse training<br/>(DSP features + classifier)"]
-    D --> E["Export inference library<br/>`firmware/lib/a5s-Gaitgaurd_inferencing/`"]
-  end
+```
+ OFFLINE (ML)                                  DEVICE (Firmware, XIAO ESP32-S3)
+ ============                                  ================================
 
-  subgraph Device["Device (Firmware)"]
-    S["LSM6DS3 IMU (6-axis)"] --> M["ESP32-S3 firmware<br/>`firmware/src/main.cpp`"]
-    M --> I["Window buffer @ `EI_CLASSIFIER_FREQUENCY`<br/>→ `run_classifier(...)`"]
-    I --> P["`P(faller)` + smoothing"]
-    P --> F["Feedback policy<br/>silent / vibration / buzzer"]
-  end
-
-  E --> M
+ +-------------------------------+             +-------------------------------+
+ | GSTRIDE v3 dataset            |             | LSM6DS3 IMU (6-axis, I2C)     |
+ | IMU CSVs + labels Excel       |             | 104 Hz, +-16 g / +-2000 dps   |
+ +---------------+---------------+             +---------------+---------------+
+                 |                                             |
+                 v                                             v
+ +-------------------------------+             +-------------------------------+
+ | Preprocess & windowing        |             | Window buffer (5 s)           |
+ | ml/preprocess_gstride.py      |             | firmware/src/main.cpp         |
+ +---------------+---------------+             +---------------+---------------+
+                 |                                             |
+                 v                                             v
+ +-------------------------------+             +-------------------------------+
+ | Edge Impulse dataset          |             | Static check                  |
+ | training / testing CSVs       |             | not walking -> stay silent    |
+ +---------------+---------------+             +---------------+---------------+
+                 |                                             |
+                 v                                             v
+ +-------------------------------+             +-------------------------------+
+ | Edge Impulse training         |             | CNN inference                 |
+ | multi-scale 1D CNN (INT8)     |             | run_classifier() -> P(faller) |
+ +---------------+---------------+             +---------------+---------------+
+                 |                                             |
+                 v                                             v
+ +-------------------------------+             +-------------------------------+
+ | Exported inference library    |             | Two-layer smoothing           |
+ | firmware/lib/                 | ----------> | 5-window avg -> 6-window risk |
+ |   a5s-Gaitgaurd_inferencing/  |  compiled   +---------------+---------------+
+ +-------------------------------+  into the                   |
+                                    firmware                   v
+                                               +-------------------------------+
+                                               | Feedback                      |
+                                               | LOW    < 0.55      silent     |
+                                               | MEDIUM 0.55-0.75   vibration  |
+                                               | HIGH   > 0.75      buzzer     |
+                                               +-------------------------------+
 ```
 
 ---
