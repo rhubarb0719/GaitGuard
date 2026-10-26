@@ -56,7 +56,7 @@ The system consists of two major parts: an **offline ML pipeline** (data → mod
                                                | Feedback                      |
                                                | LOW    < 0.55      silent     |
                                                | MEDIUM 0.55-0.75   vibration  |
-                                               | HIGH   > 0.75      buzzer     |
+                                               | HIGH  >= 0.75 (x2)  buzzer    |
                                                +-------------------------------+
 ```
 
@@ -114,7 +114,9 @@ Goal: read **LSM6DS3 6-axis IMU** data on a **Seeed XIAO ESP32S3**, buffer sampl
   - Reads IMU via I2C (acceleration in m/s², angular velocity in rad/s)
   - Sampling frequency is `EI_CLASSIFIER_FREQUENCY`
   - Runs `run_classifier(...)` whenever a full window is collected
-  - Applies a sliding average over the latest 3 windows for the `faller` probability, then triggers different feedback policies
+  - Skips inference when the wearer is static (acceleration mean-square below `STATIC_THRESHOLD`)
+  - Two-layer smoothing: averages `P(faller)` over the latest 5 windows, then averages that over the latest 6 windows to get a `risk_score`
+  - Maps `risk_score` to feedback: LOW (< 0.55) silent, MEDIUM (0.55–0.75) vibration, HIGH (≥ 0.75 for 2 consecutive windows) buzzer
 - `firmware/lib/a5s-Gaitgaurd_inferencing/`: Edge Impulse exported inference library (linked and used by `main.cpp`)
 
 ### Quick start (local development)
@@ -123,7 +125,7 @@ Goal: read **LSM6DS3 6-axis IMU** data on a **Seeed XIAO ESP32S3**, buffer sampl
 2. Go to `firmware/`, build, and flash to the XIAO ESP32S3.
 3. Open the serial monitor at `115200` (see `platformio.ini`). You should see:
    - Raw 6-axis debug output (about once per second)
-   - `P(faller)` and the smoothed probability
+   - `P(faller)`, the smoothed probability, and `risk_score`
    - Feedback level (LOW/MEDIUM/HIGH)
 
 > Note: IMU full-scale settings and unit conversions are aligned in `firmware/src/main.cpp` to match the training data units. If you change the sensor or its range, adjust this section accordingly.

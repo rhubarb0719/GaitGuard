@@ -117,7 +117,8 @@ void setup() {
                 EI_CLASSIFIER_RAW_SAMPLE_COUNT,
                 EI_CLASSIFIER_RAW_SAMPLES_PER_FRAME,
                 EI_CLASSIFIER_DSP_INPUT_FRAME_SIZE);
-  Serial.println("Thresholds: LOW<0.35 | MEDIUM<0.65 | HIGH>=0.65");
+  Serial.printf("Thresholds: LOW<%.2f | MEDIUM<%.2f | HIGH>=%.2f\n",
+                THRESH_LOW, THRESH_HIGH, THRESH_HIGH);
   Serial.println("Starting...\n");
 
   next_sample_us = micros();
