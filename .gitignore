@@ -9,6 +9,3 @@
 # Large datasets / generated artifacts (keep scripts in git)
 ml/GSTRIDE_database/
 ml/ei_dataset_5s/
-
-# Large demo video (GitHub file size limit)
-docs/demo_video.MOV
