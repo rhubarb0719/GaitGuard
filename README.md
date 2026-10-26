@@ -44,11 +44,7 @@ flowchart LR
 ```
 GaitGuard/
 ├── README.md                          ← Repository front page (this file)
-├── docs/                              ← Poster
-│   ├── HWSW2-poster.pdf               ← Project poster
-│   └── HWSW2-poster.jpg               ← Poster preview image (shown in this README)
 ├── hardware/                          ← Enclosure / hardware documentation
-│   ├── Gaitgaurd.pdf                  ← Hardware document (notes/drawings/figures)
 │   ├── front layer.png                ← Layer diagram (front)
 │   ├── back layer.png                 ← Layer diagram (back)
 │   ├── printed enclosure.JPG          ← Photo of the printed enclosure
@@ -64,10 +60,23 @@ GaitGuard/
 │       └── a5s-Gaitgaurd_inferencing/ ← Edge Impulse exported inference library
 ├── ml/                                ← ML preprocessing + Edge Impulse dataset export
 │   ├── README.md                      ← ML pipeline documentation
-│   ├── preprocess_gstride.py          ← GSTRIDE → windowed CSVs for Edge Impulse
-│   └── GSTRIDE_DDBB.xlsx              ← Labels Excel (input to preprocessing)
-└── .gitignore                         ← Ignores OS artifacts and large datasets
+│   └── preprocess_gstride.py          ← GSTRIDE → windowed CSVs for Edge Impulse
+└── docs/                              ← Poster
+    ├── HWSW2-poster.pdf               ← Project poster
+    └── HWSW2-poster.jpg               ← Poster preview image (shown in this README)
 ```
+
+---
+
+## Hardware (`hardware/`)
+
+Goal: provide enclosure/structure design assets and assembly references.
+
+### Key files
+
+- `hardware/front layer.png`, `hardware/back layer.png`: layered structure diagrams.
+- `hardware/printed enclosure.JPG`: photo of the printed enclosure / assembly.
+- `hardware/enclosure/`: 3D enclosure & clip files (`.stl` / `.3mf`).
 
 ---
 
@@ -107,18 +116,7 @@ See `ml/README.md` for the full pipeline documentation and exact commands:
 - Edge Impulse upload commands
 - Parameter defaults (window/stride/split/trim)
 
----
-
-## Hardware (`hardware/`)
-
-Goal: provide enclosure/structure design assets and assembly references.
-
-### Key files
-
-- `hardware/Gaitgaurd.pdf`: hardware-related document (notes/drawings/figures).
-- `hardware/front layer.png`, `hardware/back layer.png`: layered structure diagrams.
-- `hardware/printed enclosure.JPG`: photo of the printed enclosure / assembly.
-- `hardware/enclosure/`: 3D enclosure & clip files (`.stl` / `.3mf`, etc.).
+> The GSTRIDE v3 dataset (subject CSVs and the `GSTRIDE_DDBB.xlsx` labels file) is not included in this repo. Download it separately and place it in `ml/` before running the script.
 
 ---
 

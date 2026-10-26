@@ -8,4 +8,5 @@
 
 # Large datasets / generated artifacts (keep scripts in git)
 ml/GSTRIDE_database/
+ml/GSTRIDE_DDBB.xlsx
 ml/ei_dataset_5s/
