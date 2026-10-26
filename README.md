@@ -6,6 +6,14 @@ This repository contains the main deliverables for a prototype **wearable fall-r
 
 ---
 
+## Poster
+
+[![GaitGuard poster](docs/HWSW2-poster.jpg)](docs/HWSW2-poster.pdf)
+
+Click the image to open the full-resolution PDF: [`docs/HWSW2-poster.pdf`](docs/HWSW2-poster.pdf)
+
+---
+
 ## Architecture (end-to-end)
 
 The system consists of two major parts: an **offline ML pipeline** (data → model) and an **on-device runtime** (sensor → inference → feedback).
@@ -38,7 +46,8 @@ GaitGuard/
 ├── README.md                          ← Repository front page (this file)
 ├── docs/                              ← Demo assets
 │   ├── demo_video.mov                 ← Demo video (large file; may be git-ignored)
-│   └── HWSW2-poster.pdf               ← Project poster
+│   ├── HWSW2-poster.pdf               ← Project poster
+│   └── HWSW2-poster.jpg               ← Poster preview image (shown in this README)
 ├── hardware/                          ← Enclosure / hardware documentation
 │   ├── Gaitgaurd.pdf                  ← Hardware document (notes/drawings/figures)
 │   ├── front layer.png                ← Layer diagram (front)
